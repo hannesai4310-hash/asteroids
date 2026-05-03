@@ -2,7 +2,10 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>ASTEROIDS</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -13,12 +16,137 @@
             align-items: center;
             height: 100vh;
             overflow: hidden;
+            touch-action: none;
+            overscroll-behavior: none;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            -webkit-user-select: none;
         }
         canvas { display: block; }
+
+        /* ── TOUCH CONTROLS ─────────────────────────────────────────────────── */
+        #controls {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            padding: 0 28px calc(28px + env(safe-area-inset-bottom));
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #move-cluster {
+            position: relative;
+            width: 168px;
+            height: 168px;
+            pointer-events: none;
+        }
+
+        .ctrl-btn {
+            position: absolute;
+            pointer-events: auto;
+            touch-action: none;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            -webkit-user-select: none;
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.08);
+            border: 2px solid rgba(255, 255, 255, 0.22);
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.08s, border-color 0.08s, color 0.08s;
+        }
+        .ctrl-btn.active {
+            background: rgba(255, 255, 255, 0.28);
+            border-color: rgba(255, 255, 255, 0.65);
+            color: #fff;
+        }
+
+        /* D-Pad layout: thrust centered-top, left bottom-left, right bottom-right */
+        #btn-thrust { top: 0;    left: 50%; transform: translateX(-50%); }
+        #btn-left   { bottom: 0; left: 0; }
+        #btn-right  { bottom: 0; right: 0; }
+
+        /* Fire button – right side, bigger, orange tint */
+        #btn-fire {
+            position: static;
+            pointer-events: auto;
+            touch-action: none;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            -webkit-user-select: none;
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            background: rgba(255, 90, 30, 0.12);
+            border: 2px solid rgba(255, 120, 50, 0.35);
+            color: rgba(255, 160, 100, 0.75);
+            font-size: 13px;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.08s, border-color 0.08s, color 0.08s;
+            margin-bottom: 4px;
+        }
+        #btn-fire.active {
+            background: rgba(255, 90, 30, 0.38);
+            border-color: rgba(255, 160, 100, 0.75);
+            color: #fff;
+        }
+
+        /* ── PORTRAIT WARNING ───────────────────────────────────────────────── */
+        #portrait-warn {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: #000;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            text-align: center;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            gap: 18px;
+            z-index: 100;
+            padding: 20px;
+        }
+        #portrait-warn .icon { font-size: 52px; }
+        #portrait-warn p { font-size: 18px; line-height: 1.6; color: #aaa; }
+
+        @media (orientation: portrait) and (max-device-width: 1024px) {
+            #portrait-warn { display: flex; }
+            #controls      { display: none; }
+        }
     </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+
+<div id="controls">
+    <div id="move-cluster">
+        <button class="ctrl-btn" id="btn-thrust" type="button" aria-label="Schub">▲</button>
+        <button class="ctrl-btn" id="btn-left"   type="button" aria-label="Links drehen">◀</button>
+        <button class="ctrl-btn" id="btn-right"  type="button" aria-label="Rechts drehen">▶</button>
+    </div>
+    <button id="btn-fire" type="button" aria-label="Feuer">FEUER</button>
+</div>
+
+<div id="portrait-warn">
+    <div class="icon">📱</div>
+    <p>Bitte drehe dein Gerät<br>ins <strong style="color:#fff">Querformat</strong></p>
+</div>
+
 <script>
 'use strict';
 
@@ -239,6 +367,8 @@ hiScore   = parseInt(localStorage.getItem('ast_hi') || '0');
 particles = [];
 bgRocks   = [];
 
+const isMobile = navigator.maxTouchPoints > 0;
+
 function initGame() {
     score        = 0;
     lives        = 3;
@@ -292,7 +422,7 @@ function miniShip(x, y) {
     ctx.closePath();
     ctx.stroke();
 
-    // Linker Flügel (zurückgepfeilt)
+    // Linker Flügel
     ctx.beginPath();
     ctx.moveTo( 1, -4);
     ctx.lineTo(-3, -13);
@@ -351,12 +481,16 @@ function drawTitle() {
     if (Math.floor(Date.now() / 500) % 2) {
         ctx.fillStyle = '#fff';
         ctx.font      = '22px "Courier New", monospace';
-        ctx.fillText('DRÜCKE  SPACE  ZUM  STARTEN', W / 2, H / 2 + 26);
+        const startMsg = isMobile ? 'FEUER  DRÜCKEN  ZUM  STARTEN' : 'DRÜCKE  SPACE  ZUM  STARTEN';
+        ctx.fillText(startMsg, W / 2, H / 2 + 26);
     }
 
     ctx.fillStyle = '#555';
     ctx.font      = '14px "Courier New", monospace';
-    ctx.fillText('← → Drehen    ↑ Schub    SPACE Feuer', W / 2, H / 2 + 72);
+    const hint = isMobile
+        ? '◀ ▶ Drehen    ▲ Schub    FEUER Schießen'
+        : '← → Drehen    ↑ Schub    SPACE Feuer';
+    ctx.fillText(hint, W / 2, H / 2 + 72);
 
     ctx.fillStyle = '#fff';
     ctx.font      = '18px "Courier New", monospace';
@@ -526,7 +660,8 @@ function drawOver() {
     if (goTimer > 2 && Math.floor(goTimer * 2) % 2) {
         ctx.fillStyle = '#888';
         ctx.font      = '17px "Courier New", monospace';
-        ctx.fillText('SPACE  ZUM  FORTFAHREN', W / 2, H / 2 + 102);
+        const continueMsg = isMobile ? 'FEUER  ZUM  FORTFAHREN' : 'SPACE  ZUM  FORTFAHREN';
+        ctx.fillText(continueMsg, W / 2, H / 2 + 102);
     }
 }
 
@@ -542,13 +677,64 @@ function loop(ts) {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
 
-    if      (st === ST.TITLE)                { tickTitle(dt); drawTitle(); }
-    else if (st === ST.PLAY || st === ST.DEAD) { tickPlay(dt);  drawPlay();  }
-    else if (st === ST.OVER)                 { tickOver(dt);  drawOver();  }
+    if      (st === ST.TITLE)                  { tickTitle(dt); drawTitle(); }
+    else if (st === ST.PLAY || st === ST.DEAD)  { tickPlay(dt);  drawPlay();  }
+    else if (st === ST.OVER)                   { tickOver(dt);  drawOver();  }
 
     requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
+
+// ── MOBILE TOUCH CONTROLS ─────────────────────────────────────────────────────
+if (!isMobile) {
+    document.getElementById('controls').style.display = 'none';
+}
+
+function wireBtn(id, code) {
+    const el = document.getElementById(id);
+    const on = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        K[code] = true;
+        el.classList.add('active');
+        resumeAC();
+    };
+    const off = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        K[code] = false;
+        el.classList.remove('active');
+    };
+    el.addEventListener('touchstart',  on,  { passive: false });
+    el.addEventListener('touchend',    off, { passive: false });
+    el.addEventListener('touchcancel', off, { passive: false });
+    // Mouse fallback so buttons work when testing on desktop
+    el.addEventListener('mousedown',  on);
+    el.addEventListener('mouseup',    off);
+    el.addEventListener('mouseleave', off);
+}
+
+wireBtn('btn-left',   'ArrowLeft');
+wireBtn('btn-right',  'ArrowRight');
+wireBtn('btn-thrust', 'ArrowUp');
+wireBtn('btn-fire',   'Space');
+
+// Tap the canvas to start / continue (complement to FEUER button)
+canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    resumeAC();
+    if (st === ST.TITLE) {
+        K.Space = true;
+        setTimeout(() => { K.Space = false; }, 150);
+    } else if (st === ST.OVER && goTimer > 2) {
+        K.Space = true;
+        setTimeout(() => { K.Space = false; }, 150);
+    }
+}, { passive: false });
+
+// Prevent default browser gestures on the whole document
+document.addEventListener('touchmove',  e => e.preventDefault(), { passive: false });
+document.addEventListener('touchstart', e => { if (e.target === document.body) e.preventDefault(); }, { passive: false });
 </script>
 </body>
 </html>
